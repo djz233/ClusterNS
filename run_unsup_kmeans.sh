@@ -56,3 +56,5 @@ done
     # --do_mask \
     # --dropping_method high \
 #memory with bsz: {ad-drop+mlm:32, ad-drop:64, mlm:64}
+
+what whtat
