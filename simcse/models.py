@@ -761,6 +761,34 @@ class kmeans_cluster(nn.Module):
         dp_cluster -= torch.diag_embed(torch.ones((B))).to(device) 
         return dp_cluster, index_dp
 
+    def false_negative_loss(self, batch_cosine_sim, batch_false_negative_mask, reduction="mean", alpha=None, beta=None):
+        """
+        use BML loss for false negative examples. only implemented example-level now.
+
+        batch_cosine_sim: [bs, bs]
+        batch_false_negative_mask: [bs, bs], 0 means false negative
+        """
+        batch_delta = []
+        for i, cosine_sim in enumerate(batch_cosine_sim):
+            false_negative_mask = batch_false_negative_mask[i]
+            false_negative_index = false_negative_mask.eq(0).nonzero(as_tuple=True)[0]
+            if len(false_negative_index) > 0:
+                false_negative_value = torch.gather(cosine_sim, -1, false_negative_index.long())
+                true_value = batch_cosine_sim[i][i]
+                delta = false_negative_value - true_value
+                batch_delta.append(delta)
+        batch_delta = torch.cat(batch_delta, dim=-1)
+        loss = self.BML_loss(batch_delta, alpha, beta)
+        if reduction == "mean":
+            return loss.mean()
+        else:
+            raise NotImplementedError
+
+    @staticmethod
+    def BML_loss(x, alpha, beta):
+        """use for example-level BML loss"""
+        return F.relu(x + alpha) + F.relu(-x - beta)
+
     def forward(self, 
                 datapoints:torch.Tensor, 
                 input_ids:torch.Tensor, 
