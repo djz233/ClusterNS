@@ -789,6 +789,22 @@ class kmeans_cluster(nn.Module):
         """use for example-level BML loss"""
         return F.relu(x + alpha) + F.relu(-x - beta)
 
+    def weighted_negative(self, batch_center_points, batch_hard_neg_center_points=None, inverse=False):
+        """
+        batch_center_points: [bs, hidden_size], 每个锚点所属类的类中心向量
+        batch_hard_neg_center_points: [bs, hidden_size], 每个锚点难负例所属类的类中心向量
+        inverse: 如果为 True，类中心余弦相似度大的，权重小；
+        return: weight for loss, should add this to cos_sim
+        """
+        weights = F.cosine_similarity(batch_center_points, batch_center_points)  # (bs, bs)
+        if batch_hard_neg_center_points:
+            neg_weight = F.cosine_similarity(batch_center_points, batch_hard_neg_center_points)  # (bs, bs)
+            weights = torch.cat([weights, neg_weight], dim=-1)  # (bs, 2bs)
+        if inverse is True:
+            weights = -weights
+        weights = F.log_softmax(weights, dim=-1)
+        return weights
+
     def forward(self, 
                 datapoints:torch.Tensor, 
                 input_ids:torch.Tensor, 
