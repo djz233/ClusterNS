@@ -206,8 +206,16 @@ def cl_forward(cls,
 
     cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0)) #[bsz/2, 1, nh] * [1, bsz/2, nh] -> [bsz/2, bsz/2]
 
+    #consistency loss
+    # cst_loss_fct = nn.SmoothL1Loss(beta=cls.model_args.huber_delta)
+    # normalized_cos = cos_sim * cls.model_args.temp
+    # cst_loss1 = cst_loss_fct(normalized_cos, normalized_cos.T) #* cls.model_args.temp
+    # cst_loss2 = cst_loss_fct(normalized_cos.T, normalized_cos) #* cls.model_args.temp
+    # cst_loss = (cst_loss1 + cst_loss2) / 2
+
     #kmeans clustering
     if cls.model_args.kmeans:
+        fn_loss = None
         normalized_cos = cos_sim * cls.model_args.temp
         avg_cos = normalized_cos.mean().item() 
         if not cls.cluster.initialized:
@@ -227,14 +235,17 @@ def cl_forward(cls,
             # loss = loss + kmeans_loss
             num_sent = 3 #to be fix
             z3 = cls.cluster.provide_hard_negative(z1)
-            # cos_sim_mask = cls.cluster.mask_false_negative(z1, normalized_cos)
-            # cos_sim = cos_sim + cos_sim_mask
+            cos_sim_mask = cls.cluster.mask_false_negative(z1, normalized_cos)
+            fn_loss = cls.cluster.false_negative_loss(z1, cos_sim_mask, normalized_cos, z3)
+            # cos_sim_mask = cos_sim_mask==0
+            # cos_sim = cos_sim * cos_sim_mask.float()
+            # cos_mask = false_negative_mask * -10000
         cls.cluster.global_step += 1      
 
     # Hard negative
     if num_sent >= 3:
         z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
-        cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)        
+        cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)  #to be fix      
 
     labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
     loss_fct = nn.CrossEntropyLoss()
@@ -249,6 +260,10 @@ def cl_forward(cls,
         cos_sim = cos_sim + weights      
 
     loss = loss_fct(cos_sim, labels)
+    if fn_loss is not None:
+        loss = loss + cls.model_args.bml_weight * fn_loss
+    # if cst_loss is not None: #consistency loss
+    #     loss = loss + cls.model_args.cst_weight * cst_loss
     #print("before memory: %f" % (torch.cuda.memory_allocated(device=cls.device) / (1024 * 1024)))
 
     if do_mask:
@@ -728,10 +743,11 @@ class kmeans_cluster(nn.Module):
         self.initialized = True
 
     def provide_hard_negative(self, datapoints:torch.Tensor, batch_cos_sim:torch.Tensor=None):
+        D = self.centroid.data.shape[-1]
         if batch_cos_sim is None:
             batch_cos_sim = self.sim(datapoints.unsqueeze(1), self.centroid.unsqueeze(0))
         values, indices = torch.topk(batch_cos_sim, k=2, dim=-1)
-        hard_neg_index = indices[:, 1].unsqueeze(-1).expand_as(datapoints)
+        hard_neg_index = indices[:, 1].unsqueeze(-1).expand(-1, D)
         hard_negative = torch.gather(self.centroid, dim=0, index=hard_neg_index)
         return hard_negative.detach()
 
@@ -745,10 +761,11 @@ class kmeans_cluster(nn.Module):
         dp_centroid_cos, dp_index = torch.max(intra_cos_sim, dim=-1, keepdim=True) #(bsz, 1)
         dp_cluster, _ = self.intra_class_adjacency_(dp_index) #(bsz, bsz)
         dp_centroid_cos = dp_centroid_cos.expand_as(dp_cluster) #(bsz, bsz)
-        inter_class_mask = dp_cluster * (batch_cos_sim>dp_centroid_cos)
-        # inter_class_mask = dp_cluster
-        cos_mask = inter_class_mask * -10000
-        return cos_mask
+
+        # false_negative_mask: {1:masked, 0:unmasked}
+        # false_negative_mask = dp_cluster * (batch_cos_sim>dp_centroid_cos)
+        false_negative_mask = dp_cluster 
+        return false_negative_mask
 
     def intra_class_adjacency_(self, dp_index:torch.Tensor):
         B, device = dp_index.shape[0], dp_index.device
@@ -761,23 +778,35 @@ class kmeans_cluster(nn.Module):
         dp_cluster -= torch.diag_embed(torch.ones((B))).to(device) 
         return dp_cluster, index_dp
 
-    def false_negative_loss(self, batch_cosine_sim, batch_false_negative_mask, reduction="mean", alpha=None, beta=None):
+    def false_negative_loss(self,
+                            datapoints:torch.Tensor,
+                            batch_false_negative_mask:torch.Tensor,
+                            batch_cos_sim:torch.Tensor=None,
+                            batch_hard_negative:torch.Tensor=None,
+                            reduction:str="mean", 
+                            alpha:torch.Tensor=None, 
+                            beta=0,
+    ):
         """
         use BML loss for false negative examples. only implemented example-level now.
 
-        batch_cosine_sim: [bs, bs]
-        batch_false_negative_mask: [bs, bs], 0 means false negative
+        batch_cos_sim: [bs, bs] 
+        batch_false_negative_mask: [bs, bs], {1:masked, 0:unmasked}
+        batch_hard_negative: [bs, bs]
         """
-        batch_delta = []
-        for i, cosine_sim in enumerate(batch_cosine_sim):
-            false_negative_mask = batch_false_negative_mask[i]
-            false_negative_index = false_negative_mask.eq(0).nonzero(as_tuple=True)[0]
-            if len(false_negative_index) > 0:
-                false_negative_value = torch.gather(cosine_sim, -1, false_negative_index.long())
-                true_value = batch_cosine_sim[i][i]
-                delta = false_negative_value - true_value
-                batch_delta.append(delta)
-        batch_delta = torch.cat(batch_delta, dim=-1)
+        if batch_cos_sim is None:
+            batch_cos_sim = self.sim(datapoints.unsqueeze(1), self.centroid.unsqueeze(0))
+        batch_positive_sim = batch_cos_sim.diag().unsqueeze(-1).expand_as(batch_cos_sim)
+        if batch_hard_negative is None:
+            batch_hard_negative = self.provide_hard_negative(datapoints, batch_cos_sim)
+        if alpha is None:
+            # our goal:
+            # cos(x, hard_neg) < cos(x, false_neg) < cos(x, pos)
+            # cos(x, hard_neg)-cos(x, pos) < cos(x, false_neg)-cos(x, pos) < 0
+            dp_hardneg_sim = self.sim(datapoints.unsqueeze(1), batch_hard_negative.unsqueeze(0))
+            batch_hardneg_sim = dp_hardneg_sim.diag().unsqueeze(-1).expand_as(batch_cos_sim)
+            alpha = batch_hardneg_sim - batch_positive_sim 
+        batch_delta = (batch_cos_sim - batch_positive_sim) * batch_false_negative_mask
         loss = self.BML_loss(batch_delta, alpha, beta)
         if reduction == "mean":
             return loss.mean()
@@ -882,7 +911,6 @@ class kmeans_cluster(nn.Module):
             }
             self.writer.add_scalars("cosine", cosine_dict, self.global_step)
             detail_cosine = {
-                "inter-centroid": centroid_avg_cos,
                 "max-intra-cos": cent_dp_max_cos, "min-intra-cos": cent_dp_min_cos,
                 "max-hardneg-cos": hard_neg_max_cos, "min-hardneg-cos": hard_neg_min_cos,
                 "max-member-cos": max_member_cos, "min-member-cos": min_member_cos
