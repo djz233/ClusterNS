@@ -206,6 +206,13 @@ def cl_forward(cls,
 
     cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0)) #[bsz/2, 1, nh] * [1, bsz/2, nh] -> [bsz/2, bsz/2]
 
+    #consistency loss
+    cst_loss_fct = nn.SmoothL1Loss(beta=cls.model_args.huber_delta)
+    normalized_cos = cos_sim * cls.model_args.temp
+    cst_loss1 = cst_loss_fct(normalized_cos, normalized_cos.T) #* cls.model_args.temp
+    cst_loss2 = cst_loss_fct(normalized_cos.T, normalized_cos) #* cls.model_args.temp
+    cst_loss = (cst_loss1 + cst_loss2) / 2
+
     #kmeans clustering
     if cls.model_args.kmeans:
         normalized_cos = cos_sim * cls.model_args.temp
@@ -227,14 +234,15 @@ def cl_forward(cls,
             # loss = loss + kmeans_loss
             num_sent = 3 #to be fix
             z3 = cls.cluster.provide_hard_negative(z1)
-            # cos_sim_mask = cls.cluster.mask_false_negative(z1, normalized_cos)
-            # cos_sim = cos_sim + cos_sim_mask
+            cos_sim_mask = cls.cluster.mask_false_negative(z1, normalized_cos)
+            # cos_sim_mask = cos_sim_mask==0
+            # cos_sim = cos_sim * cos_sim_mask.float()
         cls.cluster.global_step += 1      
 
     # Hard negative
     if num_sent >= 3:
         z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
-        cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)        
+        cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)  #to be fix      
 
     labels = torch.arange(cos_sim.size(0)).long().to(cls.device)
     loss_fct = nn.CrossEntropyLoss()
@@ -249,6 +257,8 @@ def cl_forward(cls,
         cos_sim = cos_sim + weights      
 
     loss = loss_fct(cos_sim, labels)
+    if cst_loss is not None: #consistency loss
+        loss = loss + cls.model_args.cst_weight * cst_loss
     #print("before memory: %f" % (torch.cuda.memory_allocated(device=cls.device) / (1024 * 1024)))
 
     if do_mask:
@@ -745,8 +755,8 @@ class kmeans_cluster(nn.Module):
         dp_centroid_cos, dp_index = torch.max(intra_cos_sim, dim=-1, keepdim=True) #(bsz, 1)
         dp_cluster, _ = self.intra_class_adjacency_(dp_index) #(bsz, bsz)
         dp_centroid_cos = dp_centroid_cos.expand_as(dp_cluster) #(bsz, bsz)
-        inter_class_mask = dp_cluster * (batch_cos_sim>dp_centroid_cos)
-        # inter_class_mask = dp_cluster
+        # inter_class_mask = dp_cluster * (batch_cos_sim>dp_centroid_cos)
+        inter_class_mask = dp_cluster
         cos_mask = inter_class_mask * -10000
         return cos_mask
 
@@ -838,7 +848,6 @@ class kmeans_cluster(nn.Module):
             }
             self.writer.add_scalars("cosine", cosine_dict, self.global_step)
             detail_cosine = {
-                "inter-centroid": centroid_avg_cos,
                 "max-intra-cos": cent_dp_max_cos, "min-intra-cos": cent_dp_min_cos,
                 "max-hardneg-cos": hard_neg_max_cos, "min-hardneg-cos": hard_neg_min_cos,
                 "max-member-cos": max_member_cos, "min-member-cos": min_member_cos
