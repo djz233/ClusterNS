@@ -200,6 +200,15 @@ class ModelArguments:
     kmeans_optim: Optional[str] = field(
         default="adamw"
     )
+    cst_weight: Optional[float] = field(
+        default=1.0
+    )
+    huber_delta: Optional[float] = field(
+        default=0.1
+    )
+    bml_weight: Optional[float] = field(
+        default=0.01
+    )
     def __post_init__(self):
         if self.attribution is not None:
             assert self.attribution in ['AA', 'GA', 'IGA', 'RD'], "attribution should be one of ['AA', 'GA', 'IGA', 'RD'], not %s" % self.attribution
