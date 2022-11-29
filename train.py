@@ -34,11 +34,9 @@ from transformers.tokenization_utils_base import BatchEncoding, PaddingStrategy,
 from transformers.trainer_utils import is_main_process
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.file_utils import cached_property, torch_required, is_torch_available, is_torch_tpu_available
-from simcse.models import RobertaForCL, BertForCL, RobertaForADdrop
+from simcse.models import RobertaForCL, BertForCL
 from simcse.trainers import CLTrainer
 
-os.environ['MASTER_ADDR'] = 'localhost'
-os.environ['MASTER_PORT'] = '12345'
 
 logger = logging.getLogger(__name__)
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_MASKED_LM_MAPPING.keys())
@@ -125,71 +123,29 @@ class ModelArguments:
             "help": "Use MLP only during training"
         }
     )
-    do_mask: bool = field(
-        default=False,
-        metadata={
-            "help": "training with dropping or not"
-        }
-    )
-    attribution: Optional[str] = field(
-        default="GA",
-        metadata={
-            "help": "attribution methods, can be one of ['AA', 'GA', 'IGA', 'RD']"
-        }
-    )
-    dropping_method: Optional[str] = field(
-        default="high",
-        metadata={
-            "help": 'dropping from low/high attribution part' "can be either 'low' or 'high'"
-        }
-    )
-    p_rate: Optional[float] = field(
-        default=0.3,
-        metadata={
-            "help": "candidate discard region p"
-        }
-    )
-    q_rate: Optional[float] = field(
-        default=0.2,
-        metadata={
-            "help": "random drop in candidate region"
-        }
-    )   
-    mask_layers: Optional[int] = field(
-        default=0,
-        metadata={
-            "help": "do AD-DROP from layer 0 to this layer, include this layer"
-        }
-    ) 
-    my_debug: Optional[bool] = field(
-        default=False,
-    )
     dropout_prob: Optional[float] = field(
         default=None,
     )
-    abs_attr: Optional[bool] = field(
-        default=False,
-    )   
-    attr_hard_negative: Optional[bool] = field(
-        default=False,
-    )
-    attr_hardneg_dropprob: Optional[float] = field(
-        default=0.8,
-    )  
-    layer_hard_negative: Optional[int] = field(
-        default=-1,
-    )  
-    kmeans: Optional[bool] = field(
-        default=False
-    )
-    k: Optional[int] = field(
-        default=32
+    kmeans: Optional[int] = field(
+        default=128,
+        metadata={
+            "help": "number of cluster in kmeans, -1 mean do not cluster"
+            "recommand search space: [32,64,128,256], 2**x"
+        }
     )
     kmean_cosine: Optional[float] = field(
-        default=0.6
+        default=0.4,
+        metadata={
+            "help": "kmeans cluster will start"
+            "when the average cosine similarity decrease to kmean_cosine"
+            "recommand search space: 0.2~0.6, interval=0.1"
+        }
     )
     kmeans_lr: Optional[float] = field(
-        default=1e-3
+        default=1e-3,
+        metadata={
+            "help": "learning rate for kmeans centroid, for both momentum and Adamw"
+        }
     )
     kmean_debug: Optional[bool] = field(
         default=False
@@ -198,22 +154,41 @@ class ModelArguments:
         default=None
     )
     kmeans_optim: Optional[str] = field(
-        default="adamw"
+        default="momentum",
+        metadata={
+            "help": "[momentum, kmeans, adamw]"
+        }
     )
     cst_weight: Optional[float] = field(
-        default=1.0
+        default=1e-1,
+        metadata={
+            "help": "consistency, 注释cls.cluster.cluster_consistency_loss"
+        }
     )
     huber_delta: Optional[float] = field(
-        default=0.1
+        default=0.025,
+        metadata={
+            "help": "for cst smoothL1"
+        }
     )
     bml_weight: Optional[float] = field(
-        default=0.01
+        default=1e-4
     )
-    def __post_init__(self):
-        if self.attribution is not None:
-            assert self.attribution in ['AA', 'GA', 'IGA', 'RD'], "attribution should be one of ['AA', 'GA', 'IGA', 'RD'], not %s" % self.attribution
-        if self.dropping_method is not None:
-            assert self.dropping_method in ['low', 'high'], "attribution should be one of ['low', 'high'], not %s" % self.dropping_method
+    bml_beta: Optional[float] = field(
+        default=0.5
+    )
+    bml_alpha: Optional[float] = field(
+        default=0.2
+    ) 
+    bml_droprate: Optional[float] = field(
+        default=0.5
+    )   
+    cst_temp: Optional[float] = field(
+        default=0.05
+    )
+    proto_smooth: Optional[float] = field(
+        default=20.0
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -440,8 +415,7 @@ def main():
 
     if model_args.model_name_or_path:
         if 'roberta' in model_args.model_name_or_path:
-            roberta_model = RobertaForADdrop if model_args.do_mask else RobertaForCL
-            model = roberta_model.from_pretrained(
+            model = RobertaForCL.from_pretrained(
                 model_args.model_name_or_path,
                 from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
@@ -619,7 +593,7 @@ def main():
 
     data_collator = default_data_collator if data_args.pad_to_max_length else OurDataCollatorWithPadding(tokenizer)
 
-    early_stops = EarlyStoppingCallback(4)
+    early_stops = EarlyStoppingCallback(3)
     trainer = CLTrainer(
         model=model,
         args=training_args,
