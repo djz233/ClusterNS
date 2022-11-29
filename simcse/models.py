@@ -42,6 +42,26 @@ class MLPLayer(nn.Module):
 
         return x
 
+class ProjectionMLP(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        in_dim = config.hidden_size
+        hidden_dim = config.hidden_size * 2
+        out_dim = config.hidden_size
+        affine=False
+        list_layers = [nn.Linear(in_dim, hidden_dim, bias=False),
+                       nn.ReLU(inplace=True)]
+        list_layers += [nn.Linear(hidden_dim, out_dim, bias=False),
+                        ]
+        self.net = nn.Sequential(*list_layers)
+
+    def forward(self, x):
+        B, N = x.shape[0], x.shape[1]
+        y = x.view((B*N, x.size(-1)))
+        y = self.net(y)
+        y = y.view((B, N, x.size(-1)))
+        return y
+
 class Similarity(nn.Module):
     """
     Dot product or cosine similarity
@@ -208,38 +228,45 @@ def cl_forward(cls,
 
     #consistency loss
     # cst_loss_fct = nn.SmoothL1Loss(beta=cls.model_args.huber_delta)
+    # cst_loss_fct = nn.KLDivLoss()
     # normalized_cos = cos_sim * cls.model_args.temp
+    # p1 = torch.softmax(normalized_cos, dim=-1)
+    # p2 = torch.softmax(normalized_cos.T, dim=-1)
+    # target_p = (p1+p2)/2
     # cst_loss1 = cst_loss_fct(normalized_cos, normalized_cos.T) #* cls.model_args.temp
     # cst_loss2 = cst_loss_fct(normalized_cos.T, normalized_cos) #* cls.model_args.temp
     # cst_loss = (cst_loss1 + cst_loss2) / 2
+    cst_loss = None
+    adapt_weight = None
+    fn_loss = None
 
     #kmeans clustering
-    if cls.model_args.kmeans:
+    if cls.model_args.kmeans > 0:
         fn_loss = None
         normalized_cos = cos_sim * cls.model_args.temp
         avg_cos = normalized_cos.mean().item() 
+        # z12 = torch.cat([z1, z2], dim=0)
         if not cls.cluster.initialized:
             if avg_cos <= cls.model_args.kmean_cosine:
+                # with torch.no_grad():
+                #     all_cos_sim = cls.sim(z12.unsqueeze(1), z12.unsqueeze(0))
                 cls.cluster.optimized_centroid_init(z1, cos_sim*cls.model_args.temp)
                 if not dist.is_initialized() or dist.get_rank() == 0:
                     print("kmeans start!!")
-                    with open("kmeans.log", "a") as f:
-                        f.write("kmeans, k%d_lr%.0e_cosine_%.2f: step %d\n"
-                            % (cls.cluster.k, cls.cluster.lr, cls.model_args.kmean_cosine, cls.cluster.global_step)
-                            )
         elif cls.cluster.initialized:
             # if cls.cluster.global_step % 100 == 0:
             #     if not dist.is_initialized() or dist.get_rank() == 0:
             #         print(cls.cluster.centroid.data[0][:4].tolist())
             cls.cluster(z1, anc_input_ids, normalized_cos)
-            # loss = loss + kmeans_loss
             num_sent = 3 #to be fix
             z3 = cls.cluster.provide_hard_negative(z1)
             cos_sim_mask = cls.cluster.mask_false_negative(z1, normalized_cos)
             fn_loss = cls.cluster.false_negative_loss(z1, cos_sim_mask, normalized_cos, z3)
+            # adapt_weight = cls.cluster.weighted_negative(z1,z2,z3,cos_sim_mask,True)
+            # cst_loss = cls.cluster.cluster_consistency_loss(z1, z2)
             # cos_sim_mask = cos_sim_mask==0
+            # cos_sim = cos_sim + cos_sim_mask * -10000
             # cos_sim = cos_sim * cos_sim_mask.float()
-            # cos_mask = false_negative_mask * -10000
         cls.cluster.global_step += 1      
 
     # Hard negative
@@ -259,166 +286,14 @@ def cl_forward(cls,
         ).to(cls.device)
         cos_sim = cos_sim + weights      
 
+    if adapt_weight is not None:
+        cos_sim = cos_sim + adapt_weight
+
     loss = loss_fct(cos_sim, labels)
     if fn_loss is not None:
         loss = loss + cls.model_args.bml_weight * fn_loss
-    # if cst_loss is not None: #consistency loss
-    #     loss = loss + cls.model_args.cst_weight * cst_loss
-    #print("before memory: %f" % (torch.cuda.memory_allocated(device=cls.device) / (1024 * 1024)))
-
-    if do_mask:
-        ori_cos_sim = cos_sim.detach()
-        ori_loss = loss.detach().cpu().item()
-        num_layers = cls.model_args.mask_layers+1 if not cls.reverse else abs(cls.model_args.mask_layers)
-        begin, end = None, None
-        if not cls.reverse:
-            begin, end = 0, num_layers
-        else:
-            end = cls.roberta.config.num_hidden_layers
-            begin = end - num_layers
-        attribution = cls.model_args.attribution
-        drop_direction = cls.model_args.dropping_method
-
-        attention_ori = outputs.attentions
-        cls.model_args.heads = encoder.config.num_attention_heads
-        cls.model_args.max_len = attention_mask.size()[-1]
-        extend_attn_mask = attention_mask.unsqueeze(1).unsqueeze(2).expand([-1, cls.model_args.heads, cls.model_args.max_len, -1])
-        for i in range(begin, end): 
-            attr = compute_attention_attribution(loss, attention_ori[i], attribution, cls.model_args.abs_attr)
-
-            # masking low or high
-            grad_masks = None
-            if attribution == 'RD':
-                grad_masks = generate_mask_random(cls.model_args, extend_attn_mask, cls.device)
-            elif drop_direction == 'low':
-                grad_masks = generate_mask_low(cls.model_args, attr, extend_attn_mask, attention_mask,
-                                                cls.device)  # [B, H, L, L]
-            elif drop_direction == 'high':
-                grad_masks = generate_mask_high(cls.model_args, attr, extend_attn_mask, attention_mask,
-                                                cls.device)  # [B, H, L, L]
-            else:
-                raise NotImplementedError
-
-            #compute attribution-based hard negative
-            if cls.model_args.attr_hard_negative:
-                num_sent = 3
-                hard_neg_args = deepcopy(cls.model_args)
-                hard_neg_args.p_rate = hard_neg_args.attr_hardneg_dropprob
-                hard_neg_args.q_rate = 1.0
-
-                # concat attn mask due to hard negative: for the layer in which anchor attention mask by attribution to produce better representation, usually in the first layers
-                # (
-                #    modified anchor0 attn mask, 
-                #    modified anchor1 attn mask,
-                #    original hard negative attn mask,
-                # )
-                view_attn_shape = (-1, 2, cls.model_args.heads, cls.model_args.max_len, cls.model_args.max_len)
-                tmp_grad_masks = grad_masks.view(view_attn_shape)
-                one_ext_attn_mask = extend_attn_mask.view(view_attn_shape)[:,0,:,:,:]
-                grad_masks = torch.cat((tmp_grad_masks, one_ext_attn_mask.unsqueeze(1)), dim=1)
-                grad_masks = grad_masks.view(-1, cls.model_args.heads, cls.model_args.max_len, cls.model_args.max_len)
-
-            cls.ad_drop_handler.attn_mask.append(grad_masks)
-        
-        #concat attention mask and input ids for hard negative
-        if cls.model_args.attr_hard_negative:
-            end = cls.roberta.config.num_hidden_layers
-            begin = end + cls.model_args.layer_hard_negative     
-            for i in range(begin, end): 
-                hn_attr = compute_attention_attribution(loss, attention_ori[i], attribution, cls.model_args.abs_attr) 
-                anc_attr = hn_attr.view(view_attn_shape)[:,0,:,:,:] #(bsz, h, l, l)
-                anc_attn_mask = extend_attn_mask.view(view_attn_shape)[:,0,:,:,:]
-                hard_neg_grad_mask = generate_mask_low(hard_neg_args, anc_attr, anc_attn_mask, anc_attention_mask, cls.device)
-
-                # concat new hard negative attn mask with original attn mask: for the layer in which hard negative generated by masking attention of the anchor by attribution, usually in the last layers
-                # (
-                #    original anchor0 attn mask, 
-                #    original anchor1 attn mask,
-                #    modified hard negative attn mask,
-                # )                
-                tmp_grad_masks = extend_attn_mask.view(view_attn_shape)
-                hard_neg_grad_mask = torch.cat((tmp_grad_masks, hard_neg_grad_mask.unsqueeze(1)), dim=1)
-                hard_neg_grad_mask = hard_neg_grad_mask.view(-1, cls.model_args.heads, cls.model_args.max_len, cls.model_args.max_len)
-
-            cls.ad_drop_handler.attn_mask.append(grad_masks)
-
-            view_seq_shape = (-1, 2, cls.model_args.max_len)
-            tmp_input_ids = input_ids.view(view_seq_shape)
-            input_ids = torch.cat((tmp_input_ids, anc_input_ids.unsqueeze(1)), dim=1)
-            input_ids = input_ids.view(-1, cls.model_args.max_len)
-            tmp_attention_mask = attention_mask.view(view_seq_shape)
-            attention_mask = torch.cat((tmp_attention_mask, anc_attention_mask.unsqueeze(1)), dim=1)
-            attention_mask = attention_mask.view(-1, cls.model_args.max_len)      
-    
-        # Get raw embeddings
-        outputs = encoder(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=True if cls.model_args.pooler_type in ['avg_top2', 'avg_first_last'] else False,
-            return_dict=True,
-        )
-        # Pooling
-        pooler_output = cls.pooler(attention_mask, outputs)
-        pooler_output = pooler_output.view((batch_size, num_sent, pooler_output.size(-1))) # (bs, num_sent, hidden)
-
-        # If using "cls", we add an extra MLP layer
-        # (same as BERT's original implementation) over the representation.
-        if cls.pooler_type == "cls":
-            pooler_output = cls.mlp(pooler_output)
-
-        # Separate representation
-        z1, z2 = pooler_output[:,0], pooler_output[:,1]
-
-        # Hard negative
-        if num_sent == 3:
-            z3 = pooler_output[:, 2]
-
-        # Gather all embeddings if using distributed training
-        if dist.is_initialized() and cls.training:
-            # Gather hard negative
-            if num_sent >= 3:
-                z3_list = [torch.zeros_like(z3) for _ in range(dist.get_world_size())]
-                dist.all_gather(tensor_list=z3_list, tensor=z3.contiguous())
-                z3_list[dist.get_rank()] = z3
-                z3 = torch.cat(z3_list, 0)
-
-            # Dummy vectors for allgather
-            z1_list = [torch.zeros_like(z1) for _ in range(dist.get_world_size())]
-            z2_list = [torch.zeros_like(z2) for _ in range(dist.get_world_size())]
-            # Allgather
-            dist.all_gather(tensor_list=z1_list, tensor=z1.contiguous())
-            dist.all_gather(tensor_list=z2_list, tensor=z2.contiguous())
-
-            # Since allgather results do not have gradients, we replace the
-            # current process's corresponding embeddings with original tensors
-            z1_list[dist.get_rank()] = z1
-            z2_list[dist.get_rank()] = z2
-            # Get full batch embeddings: (bs x N, hidden)
-            z1 = torch.cat(z1_list, 0)
-            z2 = torch.cat(z2_list, 0)
-
-        cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0)) #[bsz/2, 1, nh] * [1, bsz/2, nh] -> [bsz/2, bsz/2]
-        # Hard negative
-        if num_sent >= 3:
-            z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
-            cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
-        loss = loss_fct(cos_sim, labels)
-    #print("after memory: %f" % (torch.cuda.memory_allocated(device=cls.device) / (1024 * 1024)))
-
-        if cls.model_args.my_debug:
-            avg_cos = cos_sim.mean().item() * cls.model_args.temp
-            cls.cmpr.append(avg_cos)
-            # if not dist.is_initialized() or dist.get_rank() in [0, -1]:
-            #     cls.writer.add_scalar('avg-cos', avg_cos, len(cls.cmpr))
-            #     cls.writer.add_scalars('drop.vs.ori', {'original': float(ori_loss), 'current': float(loss)}, global_step=len(cls.cmpr))
-            # if (len(cls.cmpr) + 1) % 50 == 0:
-            #     print("print cosine: %f"%(avg_cos))
-            #     print(cos_sim * cls.model_args.temp)
+    if cst_loss is not None: #consistency loss
+        loss = loss + cls.model_args.cst_weight * cst_loss
 
     # Calculate loss for MLM
     if mlm_outputs is not None and mlm_labels is not None:
@@ -494,6 +369,8 @@ class BertForCL(BertPreTrainedModel):
 
         if self.model_args.do_mlm:
             self.lm_head = BertLMPredictionHead(config)
+        if self.model_args.kmeans > 0:
+            self.cluster = kmeans_cluster(config, self.model_args)
 
         cl_init(self, config)
 
@@ -562,7 +439,7 @@ class RobertaForCL(RobertaPreTrainedModel):
             self.cmpr = []
             tfb_name = "unsup-simcse-cosine" 
             self.writer = SummaryWriter(os.path.join('runs', tfb_name))
-        if self.model_args.kmeans:
+        if self.model_args.kmeans > 0:
             self.cluster = kmeans_cluster(config, self.model_args)
 
         cl_init(self, config)
@@ -636,42 +513,6 @@ class hook_for_ADdrop:
             new_inputs = tuple(oringinal_outputs)
             self.iterator += 1
 
-            return new_inputs
-
-class RobertaForADdrop(RobertaForCL):
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
-    def __init__(self, config, *model_args, **model_kargs):
-        super().__init__(config, *model_args, **model_kargs)
-        self.reverse = False if self.model_args.mask_layers >= 0 else True
-        num_mask_layer = abs(self.model_args.mask_layers) if self.reverse else self.model_args.mask_layers + 1  
-        self.ad_drop_handler = hook_for_ADdrop(num_mask_layer) #for AD-DROP
-        if self.model_args.do_mask:
-            #inject hook
-            begin, end = None, None
-            if self.reverse:
-                end = self.roberta.config.num_hidden_layers
-                begin = end - num_mask_layer
-            else:
-                begin = 0
-                end = num_mask_layer
-            
-            print("injecting hook...")
-            for i in range(begin, end):
-                layer_module = self.roberta.encoder.layer[i]
-                layer_module.register_forward_pre_hook(self.ad_drop_handler)
-
-            if self.model_args.attr_hard_negative:
-                end = self.roberta.config.num_hidden_layers
-                begin = end + self.model_args.layer_hard_negative
-                print("injecting hook for hard negative...")
-                for i in range(begin, end):
-                    layer_module = self.roberta.encoder.layer[i]
-                    layer_module.register_forward_pre_hook(self.ad_drop_handler)
-
-
-
-
     def forward(self,
         input_ids=None,
         attention_mask=None,
@@ -721,18 +562,23 @@ class kmeans_cluster(nn.Module):
     def __init__(self, config, model_args):
         super().__init__()
         self.model_args = model_args
-        self.k = model_args.k
+        self.k = model_args.kmeans
         self.sim = Similarity(temp=1)
         self.initialized = False
         self.global_step = 0
         self.tokenizer = RobertaTokenizer.from_pretrained(config._name_or_path)
         self.optimization = model_args.kmeans_optim
         self.lr = model_args.kmeans_lr
+        self.beta = model_args.bml_beta
+        self.alpha = model_args.bml_alpha
+        self.huber_delta = model_args.huber_delta
+        self.cst_temp = model_args.cst_temp
+        self.proto_smooth = model_args.proto_smooth
         if model_args.kmean_debug:
             if not dist.is_initialized() or dist.get_rank() == 0:
-                self.writer = SummaryWriter("runs/kmeans-momentum-lr%.3f-%.1f-%d" % (model_args.logging_lr, model_args.kmean_cosine, model_args.k))
-                #self.writer = SummaryWriter("runs/kmeans-default-update")
-                #self.writer = SummaryWriter("runs/kmeans-klr%.0e_%d-%.3f"%(model_args.kmeans_lr, self.k, self.model_args.kmean_cosine))
+                # self.writer = SummaryWriter("runs/kmeans-momentum-lr%.3f-%.1f-%d" % (model_args.logging_lr, model_args.kmean_cosine, model_args.k))
+                # self.writer = SummaryWriter("runs/kmeans-bml-w%.1e-b%.2f" % (model_args.bml_weight, model_args.bml_beta))
+                self.writer = SummaryWriter("runs/kmeans-7798")
 
     def centroid_init(self, centroid:torch.Tensor):
         data=centroid.clone().detach()
@@ -768,6 +614,14 @@ class kmeans_cluster(nn.Module):
         return false_negative_mask
 
     def intra_class_adjacency_(self, dp_index:torch.Tensor):
+        r'''
+        dp_index: indicating the indices of cluster to which datapoints belong
+
+        return:
+        dp_cluster: [bsz, bsz], indicating that which datapoints belong to same cluster
+        index_dp: [k, bsz], indicating that which datapoints belong to the clusters
+        '''
+
         B, device = dp_index.shape[0], dp_index.device
         onehot_index = F.one_hot(dp_index.squeeze(-1), self.k) #(bsz, k)
         index_dp = onehot_index.T #(k, bsz)
@@ -775,7 +629,7 @@ class kmeans_cluster(nn.Module):
         #adjacency matrix that dp_cluster[i][j]==1 if xi and xj belong to identical cluster
         dp_cluster = torch.matmul(onehot_index.float(), index_dp.float()) 
         #set dp_cluster[i][i] = 0
-        dp_cluster -= torch.diag_embed(torch.ones((B))).to(device) 
+        dp_cluster.fill_diagonal_(0) 
         return dp_cluster, index_dp
 
     def false_negative_loss(self,
@@ -785,7 +639,7 @@ class kmeans_cluster(nn.Module):
                             batch_hard_negative:torch.Tensor=None,
                             reduction:str="mean", 
                             alpha:torch.Tensor=None, 
-                            beta=0,
+                            beta=None,
     ):
         """
         use BML loss for false negative examples. only implemented example-level now.
@@ -800,12 +654,16 @@ class kmeans_cluster(nn.Module):
         if batch_hard_negative is None:
             batch_hard_negative = self.provide_hard_negative(datapoints, batch_cos_sim)
         if alpha is None:
+            alpha = self.alpha
+        if beta is None:
             # our goal:
             # cos(x, hard_neg) < cos(x, false_neg) < cos(x, pos)
             # cos(x, hard_neg)-cos(x, pos) < cos(x, false_neg)-cos(x, pos) < 0
-            dp_hardneg_sim = self.sim(datapoints.unsqueeze(1), batch_hard_negative.unsqueeze(0))
-            batch_hardneg_sim = dp_hardneg_sim.diag().unsqueeze(-1).expand_as(batch_cos_sim)
-            alpha = batch_hardneg_sim - batch_positive_sim 
+            # -beta < cos(x, false_neg)-cos(x, pos) < -alpha
+            # dp_hardneg_sim = self.sim(datapoints.unsqueeze(1), batch_hard_negative.unsqueeze(0))
+            # batch_hardneg_sim = dp_hardneg_sim.diag().unsqueeze(-1).expand_as(batch_cos_sim)
+            # beta = batch_hardneg_sim - batch_positive_sim 
+            beta = self.beta
         batch_delta = (batch_cos_sim - batch_positive_sim) * batch_false_negative_mask
         loss = self.BML_loss(batch_delta, alpha, beta)
         if reduction == "mean":
@@ -818,22 +676,89 @@ class kmeans_cluster(nn.Module):
         """use for example-level BML loss"""
         return F.relu(x + alpha) + F.relu(-x - beta)
 
-    def weighted_negative(self, batch_center_points, batch_hard_neg_center_points=None, inverse=False):
+    def weighted_negative(self,
+        z1:torch.Tensor,
+        z2:torch.Tensor,
+        z3:torch.Tensor=None,
+        cos_sim_mask:torch.Tensor=None,
+        inverse=False,
+    ):
         """
         batch_center_points: [bs, hidden_size], 每个锚点所属类的类中心向量
         batch_hard_neg_center_points: [bs, hidden_size], 每个锚点难负例所属类的类中心向量
         inverse: 如果为 True，类中心余弦相似度大的，权重小；
         return: weight for loss, should add this to cos_sim
         """
-        weights = F.cosine_similarity(batch_center_points, batch_center_points)  # (bs, bs)
-        if batch_hard_neg_center_points:
-            neg_weight = F.cosine_similarity(batch_center_points, batch_hard_neg_center_points)  # (bs, bs)
-            weights = torch.cat([weights, neg_weight], dim=-1)  # (bs, 2bs)
+        B, device = z1.shape[0], z1.device
+        cos_sim = self.sim(z1.unsqueeze(1), z2.unsqueeze(0))
+        if cos_sim_mask is not None:
+            cos_sim += cos_sim_mask * -10000
+        if z3 is not None:
+            z1_z3_cos = self.sim(z1.unsqueeze(1), z3.unsqueeze(0))
+            cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
+        # weights = F.cosine_similarity(batch_center_points, batch_center_points)  # (bs, bs)
+        # if batch_hard_neg_center_points:
+        #     neg_weight = F.cosine_similarity(batch_center_points, batch_hard_neg_center_points)  # (bs, bs)
+        #     weights = torch.cat([weights, neg_weight], dim=-1)  # (bs, 2bs)
         if inverse is True:
-            weights = -weights
-        weights = F.log_softmax(weights, dim=-1)
-        return weights
+            cos_sim = -cos_sim
+        cos_sim.fill_diagonal_(-10000)
+        weights = F.softmax(cos_sim, dim=-1) / 0.05
+        return weights.detach()
+    
+    def cluster_consistency_loss(self, z1:torch.Tensor, z2:torch.Tensor):
+        centroid = self.centroid.data.clone().detach()
+        z1_cos_sim = self.sim(z1.unsqueeze(1), centroid.squeeze(0)) / self.cst_temp
+        z2_cos_sim = self.sim(z2.unsqueeze(1), centroid.squeeze(0)) / self.cst_temp
 
+        #consistency loss
+        cst_loss_fct = nn.KLDivLoss()
+        p1 = torch.softmax(z1_cos_sim, dim=-1)
+        p2 = torch.softmax(z2_cos_sim, dim=-1)        
+        cst_loss1 = cst_loss_fct(p2, p1) #
+        # cst_loss2 = cst_loss_fct(p2, p1) #* cls.model_args.temp
+        cst_loss = cst_loss1
+        return cst_loss
+    
+    def new_cluster_consistency_loss(self, z1:torch.Tensor, z2:torch.Tensor):
+        centroid = self.centroid.data.clone().detach()
+        z1_cos_sim = self.sim(z1.unsqueeze(1), centroid.squeeze(0)) / self.cst_temp
+        z2_cos_sim = self.sim(z2.unsqueeze(1), centroid.squeeze(0)) 
+
+        labels = z1_cos_sim.argmax(dim=-1)
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(z1_cos_sim, labels)
+        return loss
+
+    def ProtoNCE_loss(self, datapoints:torch.Tensor):
+        B, D = datapoints.shape
+        intra_cos_sim = self.sim(datapoints.unsqueeze(1), self.centroid.unsqueeze(0))
+        dp_centroid_cos, dp_index = torch.max(intra_cos_sim, dim=-1, keepdim=True) #(bsz, 1)
+        _, index_dp = self.intra_class_adjacency_(dp_index) #(k, bsz)
+        extend_dp = datapoints.unsqueeze(0).expand(self.k, B, -1) #(k, bsz, hid)
+        extend_centroid = self.centroid.data.unsqueeze(1).expand(self.k, B, -1) #(k, bsz, hid)
+
+        # average distance between centroid and datapoints belong to the cluster, empty cluster will set to 0
+        L2_distance = nn.PairwiseDistance()
+        dist_dp_centroid = L2_distance(extend_dp.reshape(-1, D), extend_centroid.reshape(-1, D)) #(k*B)
+        dist_dp_centroid = dist_dp_centroid.reshape(self.k, B) #(k, B)
+        l2_dist = torch.sum(index_dp * dist_dp_centroid, dim=-1)
+        member_count = index_dp.sum(dim=-1)
+        smooth_member_count = torch.where(member_count==0, 1, member_count)
+        avg_l2_dist = l2_dist / smooth_member_count
+
+        # calculate phi for each cluster
+        centroid_phi = avg_l2_dist / torch.log(smooth_member_count+self.proto_smooth) #use smooth_member_count to avoid empty cluster become inf
+        centroid_phi = centroid_phi.unsqueeze(0).expand(B, self.k)
+        zero_mask = torch.where(member_count==0, -10000, 0)
+        zero_mask = zero_mask.unsqueeze(0).expand(B, self.k).float() #for masking empty cluster
+        smooth_cos_sim = torch.addcdiv(zero_mask, intra_cos_sim, centroid_phi+zero_mask)
+        
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(smooth_cos_sim, dp_index.squeeze(-1))
+        return loss
+
+    
     def forward(self, 
                 datapoints:torch.Tensor, 
                 input_ids:torch.Tensor, 
