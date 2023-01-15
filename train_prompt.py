@@ -1,3 +1,4 @@
+import random
 import logging
 import math
 import os
@@ -7,6 +8,7 @@ from typing import Optional, Union, List, Dict, Tuple
 import torch
 import collections
 import random
+
 from datasets import load_dataset
 
 import transformers
@@ -34,9 +36,8 @@ from transformers.tokenization_utils_base import BatchEncoding, PaddingStrategy,
 from transformers.trainer_utils import is_main_process
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.file_utils import cached_property, torch_required, is_torch_available, is_torch_tpu_available
-from simcse.models import RobertaForCL, BertForCL
-from simcse.trainers import CLTrainer
-
+from prompt_bert.models import RobertaForCL, BertForCL
+from prompt_bert.trainers import CLTrainer
 
 logger = logging.getLogger(__name__)
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_MASKED_LM_MAPPING.keys())
@@ -86,41 +87,243 @@ class ModelArguments:
         },
     )
 
-    # SimCSE's arguments
     temp: float = field(
         default=0.05,
         metadata={
             "help": "Temperature for softmax."
         }
     )
-    pooler_type: str = field(
-        default="cls",
-        metadata={
-            "help": "What kind of pooler to use (cls, cls_before_pooler, avg, avg_top2, avg_first_last)."
-        }
-    ) 
     hard_negative_weight: float = field(
         default=0,
         metadata={
             "help": "The **logit** of weight for hard negatives (only effective if hard negatives are used)."
         }
     )
-    do_mlm: bool = field(
-        default=False,
-        metadata={
-            "help": "Whether to use MLM auxiliary objective."
-        }
-    )
-    mlm_weight: float = field(
-        default=0.1,
-        metadata={
-            "help": "Weight for MLM auxiliary objective (only effective if --do_mlm)."
-        }
-    )
     mlp_only_train: bool = field(
         default=False,
         metadata={
             "help": "Use MLP only during training"
+        }
+    )
+
+    two_bert: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+
+    freeze_layers: str= field(
+        default='',
+        metadata={
+        }
+    )
+    freeze_lm_head: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    freeze_embedding: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    label_smoothing: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    two_bert_one_freeze: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_infomax: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_template: str = field(
+        default="*cls*_The_sentence_:_'_*sent_0*_'_means*mask*.*sep+*",
+        metadata={
+        }
+    )
+    mask_embedding_sentence_bs: str = field(
+        default='This sentence of "',
+        metadata={
+        }
+    )
+    mask_embedding_sentence_es: str = field(
+        default='" means [MASK].',
+        metadata={
+        }
+    )
+    mask_embedding_sentence_with_mlm: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_different_template: str= field(
+        default="*cls*_The_sentence_:_'_*sent_0*_'_means*mask*.*sep+*",
+        metadata={
+        }
+    )
+    mask_embedding_sentence_delta_freeze: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_delta_cross_stream: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_delta_no_position: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_delta: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_delta_cotrain: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_delta_no_delta_eval: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_do_oxford: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence: bool = field(
+        default=False,
+        metadata={
+            "help": "是否开启promptBERT"
+        }
+    )
+    mask_embedding_sentence_add_period: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_num_masks: int = field(
+        default=1,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_avg: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_add_template_in_batch: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_autoprompt_random_init: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_autoprompt_continue_training: str= field(
+        default='',
+        metadata={
+        }
+    )
+    mask_embedding_sentence_autoprompt: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_autoprompt_continue_training_as_positive: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_autoprompt_freeze_prompt: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    mask_embedding_sentence_org_mlp: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    only_embedding_training: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    roberta_with_special_token: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    roberta_auto_weight_special_token: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    roberta_special_token_as_cls: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    remove_last_layer: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+
+    dot_sim: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+
+    norm_instead_temp: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    add_pseudo_instances: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    add_pseudo_instances_from_other_model: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+
+    only_negative_loss: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    untie_weights_roberta: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    token_classification: bool = field(
+        default=False,
+        metadata={
+        }
+    )
+    add_rdrop: bool = field(
+        default=False,
+        metadata={
         }
     )
     dropout_prob: Optional[float] = field(
@@ -159,6 +362,18 @@ class ModelArguments:
             "help": "[momentum, kmeans, adamw]"
         }
     )
+    cst_weight: Optional[float] = field(
+        default=1e-1,
+        metadata={
+            "help": "consistency, 注释cls.cluster.cluster_consistency_loss"
+        }
+    )
+    huber_delta: Optional[float] = field(
+        default=0.025,
+        metadata={
+            "help": "for cst smoothL1"
+        }
+    )
     bml_weight: Optional[float] = field(
         default=1e-4
     )
@@ -168,6 +383,18 @@ class ModelArguments:
     bml_alpha: Optional[float] = field(
         default=0.2
     ) 
+    bml_droprate: Optional[float] = field(
+        default=0.5
+    )   
+    cst_temp: Optional[float] = field(
+        default=0.05
+    )
+    proto_smooth: Optional[float] = field(
+        default=20.0
+    )
+    enable_hardneg: Optional[bool] = field(
+        default=True
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -196,7 +423,6 @@ class DataTrainingArguments:
         metadata={"help": "The number of processes to use for the preprocessing."},
     )
 
-    # SimCSE's arguments
     train_file: Optional[str] = field(
         default=None, 
         metadata={"help": "The training data file (.txt or .csv)."}
@@ -219,7 +445,6 @@ class DataTrainingArguments:
         default=0.15, 
         metadata={"help": "Ratio of tokens to mask for MLM (only effective if --do_mlm)"}
     )
-
     def __post_init__(self):
         if self.dataset_name is None and self.train_file is None and self.validation_file is None:
             raise ValueError("Need either a dataset name or a training/validation file.")
@@ -239,8 +464,32 @@ class OurTrainingArguments(TrainingArguments):
         default=False,
         metadata={"help": "Evaluate transfer task dev sets (in validation)."}
     )
+
+    # reset follow flag type Optional[bool] -> bool
+    # to fix typing error for TrainingArguments Optional[bool] in transformers==4.2.1
+    # https://github.com/huggingface/transformers/pull/10672
+    ddp_find_unused_parameters: bool = field(
+        default=None,
+        metadata={
+            "help": "When using distributed training, the value of the flag `find_unused_parameters` passed to "
+            "`DistributedDataParallel`."
+        },
+    )
+    disable_tqdm: bool = field(
+        default=None, metadata={"help": "Whether or not to disable the tqdm progress bars."}
+    )
+    remove_unused_columns: bool = field(
+        default=True, metadata={"help": "Remove columns not required by the model when using an nlp.Dataset."}
+    )
+    greater_is_better: bool = field(
+        default=True, metadata={"help": "Whether the `metric_for_best_model` should be maximized or not."}
+    )
+    load_best_model_at_end: bool = field(
+        default=False,
+        metadata={"help": "Whether or not to load the best model found during training at the end of training."},
+    )
     early_stop: Optional[int] = field(
-        default=3,
+        default=20,
     )   
 
     @cached_property
@@ -303,8 +552,6 @@ def main():
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-    model_args.logging_lr = training_args.learning_rate
-    logger.info(model_args, data_args, training_args)
 
     if (
         os.path.exists(training_args.output_dir)
@@ -338,6 +585,7 @@ def main():
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
+
     # Get the datasets: you can either provide your own CSV/JSON/TXT training and evaluation files (see below)
     # or just provide the name of one of the public datasets available on the hub at https://huggingface.co/datasets/
     # (the dataset will be downloaded automatically from the datasets Hub
@@ -371,13 +619,7 @@ def main():
         "revision": model_args.model_revision,
         "use_auth_token": True if model_args.use_auth_token else None,
     }
-    if model_args.config_name:
-        config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
-    elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
-    else:
-        config = CONFIG_MAPPING[model_args.model_type]()
-        logger.warning("You are instantiating a new config instance from scratch.")
+    config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
 
     tokenizer_kwargs = {
         "cache_dir": model_args.cache_dir,
@@ -385,15 +627,8 @@ def main():
         "revision": model_args.model_revision,
         "use_auth_token": True if model_args.use_auth_token else None,
     }
-    if model_args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, **tokenizer_kwargs)
-    elif model_args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, **tokenizer_kwargs)
-    else:
-        raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
-            "You can do it from another script, save it, and load it from here, using --tokenizer_name."
-        )
+
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, **tokenizer_kwargs)
 
     if model_args.model_name_or_path:
         if 'roberta' in model_args.model_name_or_path:
@@ -404,8 +639,9 @@ def main():
                 cache_dir=model_args.cache_dir,
                 revision=model_args.model_revision,
                 use_auth_token=True if model_args.use_auth_token else None,
-                model_args=model_args,
+                model_args=model_args                  
             )
+
         elif 'bert' in model_args.model_name_or_path:
             model = BertForCL.from_pretrained(
                 model_args.model_name_or_path,
@@ -416,9 +652,11 @@ def main():
                 use_auth_token=True if model_args.use_auth_token else None,
                 model_args=model_args
             )
-            if model_args.do_mlm:
-                pretrained_model = BertForPreTraining.from_pretrained(model_args.model_name_or_path)
-                model.lm_head.load_state_dict(pretrained_model.cls.predictions.state_dict())
+            if model_args.mask_embedding_sentence_org_mlp:
+                from transformers import BertForMaskedLM, BertConfig
+                config = BertConfig.from_pretrained(model_args.model_name_or_path)
+                model.mlp = BertForMaskedLM.from_pretrained(model_args.model_name_or_path, config=config).cls.predictions.transform
+
         else:
             raise NotImplementedError
     else:
@@ -431,7 +669,10 @@ def main():
     # Prepare features
     column_names = datasets["train"].column_names
     sent2_cname = None
-    if len(column_names) == 2:
+    if model_args.mask_embedding_sentence_do_oxford:
+        sent0_cname = column_names[1]
+        sent1_cname = column_names[2]
+    elif len(column_names) == 2:
         # Pair datasets
         sent0_cname = column_names[0]
         sent1_cname = column_names[1]
@@ -447,6 +688,35 @@ def main():
     else:
         raise NotImplementedError
 
+    if model_args.mask_embedding_sentence:
+        if model_args.mask_embedding_sentence_template != '':
+            template = model_args.mask_embedding_sentence_template
+            assert ' ' not in template
+            template = template.replace('*mask*', tokenizer.mask_token)\
+                               .replace('*sep+*', '')\
+                               .replace('*cls*', '').replace('*sent_0*', ' ')
+            template = template.split(' ')
+            model_args.mask_embedding_sentence_bs = template[0].replace('_', ' ')
+            if 'roberta' in model_args.model_name_or_path:
+                # remove empty block
+                model_args.mask_embedding_sentence_bs = model_args.mask_embedding_sentence_bs.strip()
+            model_args.mask_embedding_sentence_es = template[1].replace('_', ' ')
+        if model_args.mask_embedding_sentence_different_template != '':
+            template = model_args.mask_embedding_sentence_different_template
+            assert ' ' not in template
+            template = template.replace('*mask*', tokenizer.mask_token)\
+                               .replace('*sep+*', '')\
+                               .replace('*cls*', '').replace('*sent_0*', ' ')
+            template = template.split(' ')
+            model_args.mask_embedding_sentence_bs2 = template[0].replace('_', ' ')
+            if 'roberta' in model_args.model_name_or_path:
+                # remove empty block
+                model_args.mask_embedding_sentence_bs2 = model_args.mask_embedding_sentence_bs2.strip()
+            model_args.mask_embedding_sentence_es2 = template[1].replace('_', ' ')
+        #mask_embedding_sentence_bs_tokens = tokenizer.encode(model_args.mask_embedding_sentence_bs, add_special_tokens=False)
+        #mask_embedding_sentence_es_tokens = tokenizer.encode(model_args.mask_embedding_sentence_es, add_special_tokens=False)
+
+
     def prepare_features(examples):
         # padding = longest (default)
         #   If no sentence in the batch exceed the max length, then use
@@ -455,14 +725,16 @@ def main():
         #   exceed the max length.
         # padding = max_length (when pad_to_max_length, for pressure test)
         #   All sentences are padded/truncated to data_args.max_seq_length.
+
         total = len(examples[sent0_cname])
 
-        # Avoid "None" fields 
+        # Avoid "None" fields
         for idx in range(total):
             if examples[sent0_cname][idx] is None:
                 examples[sent0_cname][idx] = " "
             if examples[sent1_cname][idx] is None:
                 examples[sent1_cname][idx] = " "
+
         sentences = examples[sent0_cname] + examples[sent1_cname]
 
         # If hard negative exists
@@ -472,12 +744,41 @@ def main():
                     examples[sent2_cname][idx] = " "
             sentences += examples[sent2_cname]
 
-        sent_features = tokenizer(
-            sentences,
-            max_length=data_args.max_seq_length,
-            truncation=True,
-            padding="max_length" if data_args.pad_to_max_length else False,
-        )
+        if model_args.mask_embedding_sentence:
+            bs = tokenizer.encode(model_args.mask_embedding_sentence_bs)[:-1]
+            es = tokenizer.encode(model_args.mask_embedding_sentence_es)[1:] # remove cls or bos
+
+            if len(model_args.mask_embedding_sentence_different_template) > 0:
+                bs2 = tokenizer.encode(model_args.mask_embedding_sentence_bs2)[:-1]
+                es2 = tokenizer.encode(model_args.mask_embedding_sentence_es2)[1:] # remove cls or bos
+            else:
+                bs2, es2 = bs, es
+
+            sent_features = {'input_ids': [], 'attention_mask': []}
+            for i, s in enumerate(sentences):
+                if i < total:
+                    s = tokenizer.encode(s, add_special_tokens=False)[:data_args.max_seq_length]
+                    sent_features['input_ids'].append(bs+s+es)
+                elif i < 2*total:
+                    s = tokenizer.encode(s, add_special_tokens=False)[:data_args.max_seq_length]
+                    sent_features['input_ids'].append(bs2+s+es2)
+                else:
+                    s = tokenizer.encode(s, add_special_tokens=False)[:data_args.max_seq_length]
+                    sent_features['input_ids'].append(bs2+s+es2)
+
+            ml = max([len(i) for i in sent_features['input_ids']])
+            for i in range(len(sent_features['input_ids'])):
+                t = sent_features['input_ids'][i]
+                sent_features['input_ids'][i] = t + [tokenizer.pad_token_id]*(ml-len(t))
+                sent_features['attention_mask'].append(len(t)*[1] + (ml-len(t))*[0])
+        else:
+            sent_features = tokenizer(
+                sentences,
+                max_length=data_args.max_seq_length,
+                truncation=True,
+                padding="max_length" if data_args.pad_to_max_length else False,
+            )
+
 
         features = {}
         if sent2_cname is not None:
@@ -485,7 +786,7 @@ def main():
                 features[key] = [[sent_features[key][i], sent_features[key][i+total], sent_features[key][i+total*2]] for i in range(total)]
         else:
             for key in sent_features:
-                features[key] = [[sent_features[key][i], sent_features[key][i+total]] for i in range(total)]  
+                features[key] = [[sent_features[key][i], sent_features[key][i+total]] for i in range(total)]
         return features
 
     if training_args.do_train:
@@ -496,6 +797,8 @@ def main():
             remove_columns=column_names,
             load_from_cache_file=not data_args.overwrite_cache,
         )
+
+
     # Data collator
     @dataclass
     class OurDataCollatorWithPadding:
@@ -508,7 +811,8 @@ def main():
         mlm_probability: float = data_args.mlm_probability
 
         def __call__(self, features: List[Dict[str, Union[List[int], List[List[int]], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-            special_keys = ['input_ids', 'attention_mask', 'token_type_ids', 'mlm_input_ids', 'mlm_labels']
+
+            special_keys = ['input_ids', 'attention_mask', 'token_type_ids']
             bs = len(features)
             if bs > 0:
                 num_sent = len(features[0]['input_ids'])
@@ -526,10 +830,9 @@ def main():
                 pad_to_multiple_of=self.pad_to_multiple_of,
                 return_tensors="pt",
             )
-            if model_args.do_mlm:
-                batch["mlm_input_ids"], batch["mlm_labels"] = self.mask_tokens(batch["input_ids"])
 
             batch = {k: batch[k].view(bs, num_sent, -1) if k in special_keys else batch[k].view(bs, num_sent, -1)[:, 0] for k in batch}
+
 
             if "label" in batch:
                 batch["labels"] = batch["label"]
@@ -540,40 +843,59 @@ def main():
 
             return batch
         
-        def mask_tokens(
-            self, inputs: torch.Tensor, special_tokens_mask: Optional[torch.Tensor] = None
-        ) -> Tuple[torch.Tensor, torch.Tensor]:
-            """
-            Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
-            """
-            labels = inputs.clone()
-            # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
-            probability_matrix = torch.full(labels.shape, self.mlm_probability)
-            if special_tokens_mask is None:
-                special_tokens_mask = [
-                    self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
-                ]
-                special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
-            else:
-                special_tokens_mask = special_tokens_mask.bool()
-
-            probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
-            masked_indices = torch.bernoulli(probability_matrix).bool()
-            labels[~masked_indices] = -100  # We only compute loss on masked tokens
-
-            # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-            indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
-            inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
-
-            # 10% of the time, we replace masked input tokens with random word
-            indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-            random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
-            inputs[indices_random] = random_words[indices_random]
-
-            # The rest of the time (10% of the time) we keep the masked input tokens unchanged
-            return inputs, labels
 
     data_collator = default_data_collator if data_args.pad_to_max_length else OurDataCollatorWithPadding(tokenizer)
+
+    # setup for wandb
+    #training_args.logging_steps=20
+    #training_args.evaluation_strategy="non"
+    if model_args.mask_embedding_sentence:
+        model.mask_token_id = tokenizer.mask_token_id
+        model.pad_token_id = tokenizer.pad_token_id
+        model.bos = tokenizer.encode('')[0]
+        model.eos = tokenizer.encode('')[1]
+        model.bs = tokenizer.encode(model_args.mask_embedding_sentence_bs, add_special_tokens=False)
+        model.es = tokenizer.encode(model_args.mask_embedding_sentence_es, add_special_tokens=False)
+
+        model.mask_embedding_template = tokenizer.encode(model_args.mask_embedding_sentence_bs + model_args.mask_embedding_sentence_es)
+
+        print('template bs', model.bs)
+        print('template es', model.es)
+        print('template mask_embedding_template', tokenizer.decode(model.mask_embedding_template))
+        print('template mask_embedding_template', model.mask_embedding_template)
+
+        assert len(model.mask_embedding_template) == len(model.bs) + len(model.es) + 2
+        assert model.mask_embedding_template[1:-1] == model.bs + model.es
+
+        if len(model_args.mask_embedding_sentence_different_template) > 0:
+            model.mask_embedding_template2 = tokenizer.encode(model_args.mask_embedding_sentence_bs2 + \
+                                                              model_args.mask_embedding_sentence_es2)
+            print('d template mask_embedding_template', tokenizer.decode(model.mask_embedding_template2))
+            print('d template mask_embedding_template', model.mask_embedding_template2)
+
+        if model_args.mask_embedding_sentence_autoprompt:
+            mask_index = model.mask_embedding_template.index(tokenizer.mask_token_id)
+            index_mbv = model.mask_embedding_template[1:mask_index] + model.mask_embedding_template[mask_index+1:-1]
+
+            model.dict_mbv = index_mbv
+            model.fl_mbv = [i <= 3 for i, k in enumerate(index_mbv)]
+
+            if len(model_args.mask_embedding_sentence_autoprompt_continue_training) > 0:
+                state_dict = torch.load(model_args.mask_embedding_sentence_autoprompt_continue_training+'/pytorch_model.bin')
+                p_mbv_w = state_dict['p_mbv']
+                mlp_state_dict = {}
+                for i in state_dict:
+                    if 'mlp' == i[:3]:
+                        mlp_state_dict[i[4:]] = state_dict[i]
+                model.mlp.load_state_dict(mlp_state_dict)
+            else:
+                p_mbv_w = model.bert.embeddings.word_embeddings.weight[model.dict_mbv].clone()
+            model.register_parameter(name='p_mbv', param=torch.nn.Parameter(p_mbv_w))
+            if model_args.mask_embedding_sentence_autoprompt_freeze_prompt:
+                model.p_mbv.requires_grad = False
+
+            if model_args.mask_embedding_sentence_autoprompt_random_init:
+                model.p_mbv.data.normal_(mean=0.0, std=0.02)
 
     callbacks = []
     if training_args.early_stop:
@@ -590,11 +912,12 @@ def main():
 
     # Training
     if training_args.do_train:
-        model_path = (
-            model_args.model_name_or_path
-            if (model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path))
-            else None
-        )
+        #model_path = (
+            #model_args.model_name_or_path
+            #if (model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path))
+            #else None
+        #)
+        model_path = None
         train_result = trainer.train(model_path=model_path)
         trainer.save_model()  # Saves the tokenizer too for easy upload
 
@@ -613,7 +936,7 @@ def main():
     results = {}
     if training_args.do_eval:
         logger.info("*** Evaluate ***")
-        results = trainer.evaluate(eval_senteval_transfer=False) #to be fix
+        results = trainer.evaluate(eval_senteval_transfer=False)
 
         output_eval_file = os.path.join(training_args.output_dir, "eval_results.txt")
         if trainer.is_world_process_zero():
