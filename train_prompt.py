@@ -205,7 +205,6 @@ class ModelArguments:
     mask_embedding_sentence: bool = field(
         default=False,
         metadata={
-            "help": "是否开启promptBERT"
         }
     )
     mask_embedding_sentence_add_period: bool = field(
@@ -362,18 +361,6 @@ class ModelArguments:
             "help": "[momentum, kmeans, adamw]"
         }
     )
-    cst_weight: Optional[float] = field(
-        default=1e-1,
-        metadata={
-            "help": "consistency, 注释cls.cluster.cluster_consistency_loss"
-        }
-    )
-    huber_delta: Optional[float] = field(
-        default=0.025,
-        metadata={
-            "help": "for cst smoothL1"
-        }
-    )
     bml_weight: Optional[float] = field(
         default=1e-4
     )
@@ -383,15 +370,6 @@ class ModelArguments:
     bml_alpha: Optional[float] = field(
         default=0.2
     ) 
-    bml_droprate: Optional[float] = field(
-        default=0.5
-    )   
-    cst_temp: Optional[float] = field(
-        default=0.05
-    )
-    proto_smooth: Optional[float] = field(
-        default=20.0
-    )
     enable_hardneg: Optional[bool] = field(
         default=True
     )
