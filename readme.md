@@ -16,11 +16,11 @@ We provide two bash scripts for running the code with *Non-prompt* and *Prompt-b
 |:-------------------------------|:--------:|
 |  ClusterNS-non-prmt-bert-base-uncased |   77.55 |
 | ClusterNS-non-prmt-bert-large-uncased |   79.19  |
-|    [ClusterNS-non-prmt-roberta-base](https://huggingface.co/ClusterNS-non-prmt-roberta-base)    |   77.98  |
+|    [ClusterNS-non-prmt-roberta-base](https://drive.google.com/file/d/17qwll3YI55-5IeZJQdm4yfFSYeCamBco/view?usp=share_link)    |   77.98  |
 |    ClusterNS-non-prmt-roberta-large  |   79.43  |
 |   ClusterNS-prmt-bert-base-uncased|   78.72  |
 |  ClusterNS-prmt-bert-large-uncased  |   80.30  |
-|     [ClusterNS-prmt-roberta-base](https://huggingface.co/ClusterNS-prmt-roberta-base)     |   79.74  |
+|     [ClusterNS-prmt-roberta-base](https://drive.google.com/file/d/1VmzM2LdWzx6SAU4u69tRAsBXEGLbGK5g/view?usp=share_link)     |   79.74  |
 
 # Hyperparameters
 
