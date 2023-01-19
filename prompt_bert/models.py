@@ -548,9 +548,6 @@ class kmeans_cluster(nn.Module):
         self.lr = model_args.kmeans_lr
         self.beta = model_args.bml_beta
         self.alpha = model_args.bml_alpha
-        self.huber_delta = model_args.huber_delta
-        self.cst_temp = model_args.cst_temp
-        self.proto_smooth = model_args.proto_smooth
         if model_args.kmean_debug:
             if not dist.is_initialized() or dist.get_rank() == 0:
                 # self.writer = SummaryWriter("runs/kmeans-momentum-lr%.3f-%.1f-%d" % (model_args.logging_lr, model_args.kmean_cosine, model_args.k))
