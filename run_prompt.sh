@@ -32,6 +32,7 @@ python -m torch.distributed.launch --nproc_per_node $NUM_GPU train_prompt.py \
     --do_train \
     --kmeans 128 \
     --kmean_cosine 0.4 \
+    --enable_hardneg \
     --mask_embedding_sentence \
     --mask_embedding_sentence_delta \
     --mask_embedding_sentence_template $TEMPLATE\
