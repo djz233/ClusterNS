@@ -5,7 +5,7 @@ export OMP_NUM_THREADS=4
 export CUDA_VISIBLE_DEVICES=2,3
 
 python -m torch.distributed.launch --nproc_per_node $NUM_GPU --master_port 10492 train.py \
-    --model_name_or_path ../plm/roberta-base \
+    --model_name_or_path roberta-base \
     --train_file data/wiki1m_for_simcse.txt \
     --output_dir result/ClusterNS-non-prmt-roberta-base \
     --num_train_epochs 1 \
