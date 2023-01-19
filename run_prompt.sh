@@ -13,7 +13,7 @@ TEMPLATE="*cls*_This_sentence_:_'_*sent_0*_'_means*mask*.*sep+*"
 TEMPLATE2="*cls*_The_sentence_:_'_*sent_0*_'_means*mask*.*sep+*"
 
 python -m torch.distributed.launch --nproc_per_node $NUM_GPU train_prompt.py \
-    --model_name_or_path ../plm/bert-base-uncased \
+    --model_name_or_path bert-base-uncased \
     --train_file data/wiki1m_for_simcse.txt \
     --output_dir result/ClusterNS-prmt-bert-base \
     --num_train_epochs 1 \
