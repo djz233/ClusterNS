@@ -11,12 +11,12 @@ Before running the code, you may need to implement some preparation, including:
 
 # Main Results
 
-We provide two bash scripts for running the code with *Non-prompt* and *Prompt-based* ClusterNS, respectively and release some checkpoints of our models. We release two of them in google drive first due to the limitation of storage space, and all models will be released in Huggingface after ACL2023.
+We provide two bash scripts **run_non_prompt.sh** and **run_prompt.sh** for training and evaluating *Non-prompt* and *Prompt-based* ClusterNS, respectively. We have also released all checkpoints in Huggingface.
 |              Model              | Avg. STS |
 |:-------------------------------|:--------:|
 |  ClusterNS-non-prmt-bert-base-uncased |   77.55 |
 | ClusterNS-non-prmt-bert-large-uncased |   79.19  |
-|    [ClusterNS-non-prmt-roberta-base](https://drive.google.com/file/d/17qwll3YI55-5IeZJQdm4yfFSYeCamBco/view?usp=share_link)    |   77.98  |
+|    [ClusterNS-non-prmt-roberta-base](https://huggingface.co/djz233/ClusterNS-nonPrompt-roberta-base)    |   77.98  |
 |    ClusterNS-non-prmt-roberta-large  |   79.43  |
 |   ClusterNS-prmt-bert-base-uncased|   78.72  |
 |  ClusterNS-prmt-bert-large-uncased  |   80.30  |
