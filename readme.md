@@ -1,6 +1,6 @@
 # Introduction
 
-We introduction how to run ClusterNS and reproduce the main results in this document.
+We introduce how to run ClusterNS and reproduce the main results in this document.
 
 # Preparation
 
