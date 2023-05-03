@@ -1,6 +1,6 @@
 # Introduction
 
-We introduce how to run ClusterNS and reproduce the main results in this document.
+The document is the official source code of **Clustering-Aware Negative Sampling for Unsupervised Sentence Representation**, a paper in *Finding of ACL2023*. We introduce how to run ClusterNS and reproduce the main results here.
 
 # Preparation
 
