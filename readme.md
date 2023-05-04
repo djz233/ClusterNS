@@ -14,13 +14,13 @@ Before running the code, you may need to implement some preparation, including:
 We provide two bash scripts **run_non_prompt.sh** and **run_prompt.sh** for training and evaluating *Non-prompt* and *Prompt-based* ClusterNS, respectively. We have also released all checkpoints in Huggingface.
 |              Model              | Avg. STS |
 |:-------------------------------|:--------:|
-|  ClusterNS-non-prmt-bert-base-uncased |   77.55 |
-| ClusterNS-non-prmt-bert-large-uncased |   79.19  |
+|  [ClusterNS-non-prmt-bert-base-uncased](https://huggingface.co/djz233/ClusterNS-nonPrompt-bert-base) |   77.55 |
+| [ClusterNS-non-prmt-bert-large-uncased](https://huggingface.co/djz233/ClusterNS-nonPrompt-bert-large) |   79.19  |
 |    [ClusterNS-non-prmt-roberta-base](https://huggingface.co/djz233/ClusterNS-nonPrompt-roberta-base)    |   77.98  |
-|    ClusterNS-non-prmt-roberta-large  |   79.43  |
-|   ClusterNS-prmt-bert-base-uncased|   78.72  |
-|  ClusterNS-prmt-bert-large-uncased  |   80.30  |
-|     [ClusterNS-prmt-roberta-base](https://drive.google.com/file/d/1VmzM2LdWzx6SAU4u69tRAsBXEGLbGK5g/view?usp=share_link)     |   79.74  |
+|    [ClusterNS-non-prmt-roberta-large](https://huggingface.co/djz233/ClusterNS-nonPrompt-roberta-large)  |   79.43  |
+|   [ClusterNS-prmt-bert-base-uncased](https://huggingface.co/djz233/ClusterNS-Prompt-bert-base)|   78.72  |
+|  [ClusterNS-prmt-bert-large-uncased](https://huggingface.co/djz233/ClusterNS-Prompt-bert-large)  |   80.30  |
+|     [ClusterNS-prmt-roberta-base](https://huggingface.co/djz233/ClusterNS-Prompt-roberta-base)     |   79.74  |
 
 # Hyperparameters
 
