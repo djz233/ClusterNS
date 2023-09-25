@@ -200,22 +200,14 @@ def cl_forward(cls,
         z2 = torch.cat(z2_list, 0)
 
     cos_sim = cls.sim(z1.unsqueeze(1), z2.unsqueeze(0)) #[bsz/2, 1, nh] * [1, bsz/2, nh] -> [bsz/2, bsz/2]
-
-    #consistency loss
-    # cst_loss_fct = nn.SmoothL1Loss(beta=cls.model_args.huber_delta)
-    # cst_loss_fct = nn.KLDivLoss()
     fn_loss = None
-
     #kmeans clustering
     if cls.model_args.kmeans > 0:
-        fn_loss = None
         normalized_cos = cos_sim * cls.model_args.temp
         avg_cos = normalized_cos.mean().item() 
-        # z12 = torch.cat([z1, z2], dim=0)
+        
         if not cls.cluster.initialized:
             if avg_cos <= cls.model_args.kmean_cosine:
-                # with torch.no_grad():
-                #     all_cos_sim = cls.sim(z12.unsqueeze(1), z12.unsqueeze(0))
                 cls.cluster.optimized_centroid_init(z1, cos_sim*cls.model_args.temp)
                 if not dist.is_initialized() or dist.get_rank() == 0:
                     print("kmeans start!!")
@@ -228,9 +220,6 @@ def cl_forward(cls,
             z3, _, _ = cls.cluster.provide_hard_negative(z1)
             cos_sim_mask = cls.cluster.mask_false_negative(z1, normalized_cos)
             fn_loss = cls.cluster.false_negative_loss(z1, cos_sim_mask, normalized_cos, z3)
-            # cos_sim_mask = cos_sim_mask==0
-            # cos_sim = cos_sim + cos_sim_mask * -10000
-            # cos_sim = cos_sim * cos_sim_mask.float()
         cls.cluster.global_step += 1   
 
     # Hard negative
@@ -459,9 +448,6 @@ class kmeans_cluster(nn.Module):
         if model_args.kmean_debug:
             if not dist.is_initialized() or dist.get_rank() == 0:
                 self.writer = SummaryWriter("runs/kmeans-7798-nobml-%.1f" % (model_args.kmean_cosine))
-                # self.writer = SummaryWriter("runs/kmeans-bml-w%.1e-b%.2f" % (model_args.bml_weight, model_args.bml_beta))
-                # self.writer = SummaryWriter("runs/kmeans-7798")
-
 
     def provide_hard_negative(self, datapoints:torch.Tensor, intra_cos_sim:torch.Tensor=None):
         D = self.centroid.data.shape[-1]
