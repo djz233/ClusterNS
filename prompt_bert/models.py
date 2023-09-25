@@ -235,29 +235,18 @@ def cl_forward(cls,
     if cls.model_args.kmeans > 0:
         normalized_cos = cos_sim * cls.model_args.temp
         avg_cos = normalized_cos.mean().item() 
-        # z12 = torch.cat([z1, z2], dim=0)
         if not cls.cluster.initialized:
             if avg_cos <= cls.model_args.kmean_cosine:
-                # with torch.no_grad():
-                #     all_cos_sim = cls.sim(z12.unsqueeze(1), z12.unsqueeze(0))
                 cls.cluster.optimized_centroid_init(z1, cos_sim*cls.model_args.temp)
                 if not dist.is_initialized() or dist.get_rank() == 0:
                     print("kmeans start!!")
         elif cls.cluster.initialized:
-            # if cls.cluster.global_step % 100 == 0:
-            #     if not dist.is_initialized() or dist.get_rank() == 0:
-            #         print(cls.cluster.centroid.data[0][:4].tolist())
             cls.cluster(z1, normalized_cos)
             if cls.model_args.enable_hardneg:
                 num_sent = 3 #to be fix
                 z3 = cls.cluster.provide_hard_negative(z1)
             cos_sim_mask = cls.cluster.mask_false_negative(z1, normalized_cos)
             fn_loss = cls.cluster.false_negative_loss(z1, cos_sim_mask, normalized_cos, None)
-            # adapt_weight = cls.cluster.weighted_negative(z1,z2,z3,cos_sim_mask,True)
-            # cst_loss = cls.cluster.cluster_consistency_loss(z1, z2)
-            # cos_sim_mask = cos_sim_mask==0
-            # cos_sim = cos_sim + cos_sim_mask * -10000
-            # cos_sim = cos_sim * cos_sim_mask.float()
         cls.cluster.global_step += 1    
 
     # Hard negative
@@ -269,10 +258,6 @@ def cl_forward(cls,
     if num_sent >= 3:
         z1_z3_cos = cls.sim(z1.unsqueeze(1), z3.unsqueeze(0))
         cos_sim = torch.cat([cos_sim, z1_z3_cos], 1)
-
-    # print(cos_sim[cm].mean()*cls.model_args.temp, cos_sim[~cm].mean()*cls.model_args.temp)
-    #import pdb;pdb.set_trace()
-    #cos_sim.topk(k=2, dim=-1)
 
     loss_fct = nn.CrossEntropyLoss()
     labels = torch.arange(cos_sim.size(0)).long().to(input_ids.device)
@@ -550,8 +535,6 @@ class kmeans_cluster(nn.Module):
         self.alpha = model_args.bml_alpha
         if model_args.kmean_debug:
             if not dist.is_initialized() or dist.get_rank() == 0:
-                # self.writer = SummaryWriter("runs/kmeans-momentum-lr%.3f-%.1f-%d" % (model_args.logging_lr, model_args.kmean_cosine, model_args.k))
-                # self.writer = SummaryWriter("runs/kmeans-bml-w%.1e-b%.2f" % (model_args.bml_weight, model_args.bml_beta))
                 self.writer = SummaryWriter("runs/kmeans-prmpt-7974-hn")
 
 
