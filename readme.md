@@ -1,3 +1,35 @@
+<p align="center" width="100%">
+</p >
+
+<div id="top" align="center">
+
+<div align="center">
+<h1>Clustering-Aware Negative Sampling for Unsupervised </br> Sentence Representation</h1>
+</div>
+
+<img src="https://img.shields.io/badge/Version-1.0.0-blue.svg" alt="Version"> 
+<img src="https://img.shields.io/badge/License-Apache_2.0-green.svg" alt="License">
+<img src="https://img.shields.io/github/stars/djz233/ClusterNS?color=yellow" alt="Stars">
+<img src="https://img.shields.io/github/issues/djz233/ClusterNS?color=red" alt="Issues">
+
+<h4> |<a href="https://arxiv.org/pdf/2305.09892.pdf"> 📑 Paper </a> |
+ |<a href="https://huggingface.co/models?sort=trending&search=djz233%2FClusterNS"> 🤗 Model </a> |
+ |<a href="https://github.com/djz233/ClusterNS"> 🐱 Github Repo </a > |
+</h4>
+
+<!-- **Authors:** -->
+
+_**Jinghao Deng<sup>†</sup>, Fanqi Wan<sup>†</sup>, Tao Yang<sup>†</sup>, Xiaojun Quan<sup>†</sup>, Rui Wang<sup>‡</sup>**_
+
+
+<!-- **Affiliations:** -->
+
+
+_<sup>†</sup> Sun Yat-sen University,
+<sup>‡</sup> Vipshop_
+
+</div>
+
 # Introduction
 
 The document is the official source code of **Clustering-Aware Negative Sampling for Unsupervised Sentence Representation**, a paper in *Finding of ACL2023*. We introduce how to run ClusterNS and reproduce the main results here.
